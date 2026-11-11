@@ -1,0 +1,62 @@
+@startuml C4_components_credit_online
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+
+title Заявка на кредит онлайн: диаграмма компонентов
+
+Person(client, "Клиент")
+Person(staff, "Менеджеры отделения и кредитования")
+System(site, "Сайт")
+ContainerQueue(kafka, "Kafka", "Общая шина банка", "credit.products, credit.applications, credit.application-status, credit.scoring-results")
+System(scor, "Система кредитного скоринга", "Python, Flask. Новый метод: упрощённый скоринг по БКИ")
+System_Ext(bki, "Бюро кредитных историй")
+
+System_Boundary(ib, "Интернет-банк") {
+Container(gw, "API-шлюз", "nginx", "TLS, балансировка, маршрутизация")
+Container(ib_web, "Веб-приложение интернет-банка", "ASP.NET MVC", "Новые страницы кредитов")
+Container(notif, "Сервис уведомлений", ".NET 8", "СМС-коды и СМС о статусах, из MVP депозитов")
+Container_Boundary(cas, "Сервис кредитных заявок (.NET 8)") {
+  Component(api, "API кредитов", "ASP.NET Core", "Условия, предодобренные предложения, приём заявок, статус")
+  Component(offers, "Предодобренные предложения", "Сервисный слой", "Сумма и срок по последнему скорингу клиента, без новых расчётов")
+  Component(apps, "Заявки", "Сервисный слой", "Проверка данных и СМС-кода, сохранение, outbox")
+  Component(sync, "Обмен с конвейером", "Confluent.Kafka", "Отправляет заявки, читает условия, результаты скоринга и статусы")
+  ComponentDb(cas_db, "БД сервиса", "MS SQL", "Условия кредитов, предложения, заявки и статусы")
+}
+}
+
+System_Boundary(convsys, "Кредитный конвейер") {
+ContainerDb(conv_db, "БД конвейера", "Oracle", "Заявки, процессы, клиенты")
+Container_Boundary(conv, "Приложение Camunda (Java)") {
+  Component(listener, "Приём онлайн-заявок", "Spring Kafka", "Читает credit.applications и запускает процесс")
+  Component(process, "Процесс онлайн-заявки", "BPMN", "Ветки: новый клиент с сайта, предодобренная заявка, обычная заявка")
+  Component(scor_task, "Вызов скоринга", "Java delegate", "Полный или упрощённый скоринг в зависимости от ветки")
+  Component(publisher, "Публикация событий", "Spring Kafka", "Статусы заявок, результаты скоринга, условия кредитов")
+  Component(tasklist, "Рабочее место сотрудников", "Camunda Tasklist", "Новая задача для отделения: идентификация, номер клиента в АБС, продолжение заявки")
+}
+}
+
+Rel(client, gw, "Интернет-банк", "HTTPS")
+Rel(client, site, "Заявка с сайта", "HTTPS")
+Rel(site, gw, "Условия, заявка, статус решения", "HTTPS, REST")
+Rel(gw, ib_web, "Страницы", "HTTP")
+Rel(gw, api, "API кредитов", "REST")
+Rel(ib_web, api, "Кредиты и заявки клиента", "REST")
+Rel(api, offers, "Предложения клиента")
+Rel(api, apps, "Новая заявка")
+Rel(apps, notif, "СМС-код", "REST")
+Rel(apps, cas_db, "Заявки")
+Rel(offers, cas_db, "Предложения")
+Rel(sync, cas_db, "Outbox, статусы, условия")
+Rel(sync, kafka, "Пишет заявки, читает события", "Kafka")
+Rel(listener, kafka, "Читает заявки", "Kafka")
+Rel(listener, process, "Старт процесса")
+Rel(process, scor_task, "Шаг скоринга")
+Rel(scor_task, scor, "Скоринг", "REST")
+Rel(scor, bki, "Кредитная история", "REST")
+Rel(process, publisher, "Смена статуса, результат скоринга")
+Rel(publisher, kafka, "Публикует", "Kafka")
+Rel(process, tasklist, "Задачи сотрудникам")
+Rel(process, conv_db, "Состояние заявки", "JDBC")
+Rel(staff, tasklist, "Работают с заявками")
+Rel(notif, kafka, "Читает credit.application-status", "Kafka")
+@enduml
