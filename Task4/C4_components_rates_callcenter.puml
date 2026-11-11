@@ -1,0 +1,43 @@
+@startuml C4_components_rates_callcenter
+!include <C4/C4_Component>
+LAYOUT_TOP_DOWN()
+
+title Ставки для кол-центров: диаграмма компонентов
+
+Person(cc_op, "Оператор кол-центра банка")
+System_Ext(pccs, "Система партнёрского кол-центра")
+System(sftp, "SFTP-сервер банка", "OpenSSH в DMZ, каталог /rates, доступ по ключу и списку IP партнёра")
+ContainerQueue(kafka, "Kafka", "Общая шина банка", "Топик deposit.rates")
+
+System_Boundary(abs, "АБС") {
+  ContainerDb(abs_db, "БД АБС", "Oracle", "Справочник ставок, таблица исходящих событий")
+  Container_Boundary(abs_int, "Сервис интеграции депозитов (Java, Spring Boot)") {
+    Component(rates_reader, "Чтение ставок", "Spring, JDBC", "Раз в несколько секунд забирает события об изменении ставок и читает актуальный набор")
+    Component(rates_pub, "Публикация ставок", "Spring Kafka", "Отправляет полный актуальный набор ставок в deposit.rates")
+    Component(file_export, "Выгрузка ставок в файл", "Spring Scheduling", "Формирует CSV при изменении ставок и каждое утро в 8:00")
+    Component(sftp_client, "SFTP-клиент", "Apache MINA SSHD", "Кладёт файл во временное имя и переименовывает, чтобы партнёр не забрал недописанный")
+  }
+}
+
+System_Boundary(ccs, "Система кол-центра (платформа подрядчика)") {
+  Container_Boundary(rates_mod, "Модуль ставок (Java, Spring Boot, модуль расширения)") {
+    Component(rates_consumer, "Приёмник ставок", "Spring Kafka", "Читает deposit.rates и сохраняет последнюю версию")
+    Component(rates_api, "API ставок", "Spring Web", "Отдаёт ставки интерфейсу оператора")
+    ComponentDb(rates_store, "Таблица ставок", "PostgreSQL", "Актуальные ставки и время обновления")
+  }
+  Container(cc_ui, "Веб-интерфейс оператора", "React", "Новый виджет ставок в карточке звонка")
+}
+
+Rel(rates_reader, abs_db, "События и ставки", "JDBC")
+Rel(rates_reader, rates_pub, "Новый набор ставок")
+Rel(rates_reader, file_export, "Новый набор ставок")
+Rel(rates_pub, kafka, "Публикует", "Kafka")
+Rel(file_export, sftp_client, "Готовый CSV")
+Rel(sftp_client, sftp, "Загрузка rates_latest.csv и архива", "SFTP")
+Rel(pccs, sftp, "Забирает rates_latest.csv", "SFTP")
+Rel(rates_consumer, kafka, "Читает", "Kafka")
+Rel(rates_consumer, rates_store, "Сохраняет")
+Rel(rates_api, rates_store, "Читает")
+Rel(cc_ui, rates_api, "Ставки", "REST")
+Rel(cc_op, cc_ui, "Смотрит ставки во время звонка")
+@enduml
