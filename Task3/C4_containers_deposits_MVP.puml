@@ -1,0 +1,55 @@
+@startuml C4_containers_deposits_MVP
+!include <C4/C4_Container>
+LAYOUT_TOP_DOWN()
+
+title Открытие депозитов онлайн (MVP): диаграмма контейнеров
+
+Person(client, "Клиент")
+Person(cc_op, "Оператор кол-центра")
+Person(bo, "Менеджеры бэк-офиса", "Депозиты и кредиты, у каждого свои права")
+Person(front, "Менеджер отделения")
+
+System(site, "Сайт", "PHP, React")
+System(ccs, "Система кол-центра", "Spring Boot, PostgreSQL. Новый модуль: приём заявок с сайта")
+System(sms, "СМС-шлюз", "Поддерживает IT-отдел банка")
+System_Ext(tel, "Телеком-оператор")
+
+System_Boundary(ib, "Интернет-банк") {
+  Container(gw, "API-шлюз", "nginx", "TLS, балансировка между серверами и двумя ЦОД, маршрутизация в новые сервисы")
+  Container(ib_web, "Веб-приложение интернет-банка", "ASP.NET MVC 4.5, монолит подрядчика", "Новые страницы депозитов, данные берёт из депозитного сервиса")
+  Container(dep_svc, "Депозитный сервис", ".NET 8, ASP.NET Core", "Каталог депозитов, ставки и персональные надбавки, приём заявок, статусы")
+  ContainerDb(dep_db, "БД депозитного сервиса", "MS SQL", "Копия ставок, заявки, статусы, персональные надбавки")
+  Container(notif, "Сервис уведомлений", ".NET 8", "СМС-коды подтверждения и СМС о статусах заявок")
+  ContainerDb(notif_db, "БД уведомлений", "MS SQL", "Хэши СМС-кодов со сроком жизни, журнал отправок")
+}
+
+ContainerQueue(kafka, "Kafka", "Общая шина банка, кластер в двух ЦОД, ведёт управление IT", "Топики: deposit.rates, deposit.offers, deposit.applications, deposit.application-status, site.leads")
+
+System_Boundary(abs, "АБС") {
+  Container(abs_client, "Клиент АБС", "Delphi", "Новые экраны: справочник ставок, очередь онлайн-заявок")
+  Container(abs_int, "Сервис интеграции депозитов", "Java, Spring Boot", "Публикует ставки и статусы, создаёт заявки в АБС в своём темпе")
+  ContainerDb(abs_db, "БД АБС", "Oracle, PL/SQL", "Справочник ставок с разграничением доступа, заявки на депозит, счета")
+}
+
+Rel(client, gw, "Интернет-банк", "HTTPS")
+Rel(client, site, "Каталог депозитов, заявка", "HTTPS")
+Rel(gw, ib_web, "Страницы интернет-банка", "HTTP")
+Rel(gw, dep_svc, "API депозитов", "HTTP, REST")
+Rel(site, gw, "Каталог и заявка нового клиента", "HTTPS, REST")
+Rel(ib_web, abs_db, "Счета клиента: существующая интеграция, в MVP не меняем", "SQL")
+Rel(ib_web, dep_svc, "Ставки, заявка, статус", "REST")
+Rel(dep_svc, notif, "Отправить СМС-код, проверить код", "REST")
+Rel(dep_svc, dep_db, "Чтение и запись", "SQL")
+Rel(dep_svc, kafka, "Публикует заявки и лиды с сайта, читает ставки и статусы", "Kafka")
+Rel(notif, kafka, "Читает статусы заявок", "Kafka")
+Rel(notif, notif_db, "Коды и журнал", "SQL")
+Rel(notif, sms, "Отправка СМС", "HTTPS")
+Rel(abs_int, kafka, "Публикует ставки, надбавки и статусы, читает заявки", "Kafka")
+Rel(abs_int, abs_db, "Хранимые процедуры", "JDBC")
+Rel(abs_client, abs_db, "Работа сотрудников", "SQL*Net")
+Rel(front, abs_client, "Открывает депозит новому клиенту после звонка из кол-центра")
+Rel(bo, abs_client, "Ведут ставки, подтверждают ставку по заявке")
+Rel(ccs, kafka, "Читает site.leads", "Kafka")
+Rel(cc_op, ccs, "Звонит по заявке")
+Rel(sms, tel, "СМС")
+@enduml
