@@ -1,0 +1,25 @@
+@startuml C4_context_rates_callcenter
+!include <C4/C4_Context>
+LAYOUT_LEFT_RIGHT()
+
+title Ставки для кол-центров: диаграмма контекста
+
+Person(client, "Клиент", "Звонит уточнить условия депозита")
+Person(cc_op, "Оператор кол-центра банка")
+Person_Ext(pcc_op, "Оператор партнёрского кол-центра")
+Person(bo, "Менеджеры бэк-офиса", "Ведут ставки")
+
+System(abs, "АБС", "Справочник ставок, сервис интеграции депозитов")
+System(ccs, "Система кол-центра", "Новый модуль: актуальные ставки")
+System(sftp, "SFTP-сервер банка", "В DMZ, файлы со ставками для партнёра")
+System_Ext(pccs, "Система партнёрского кол-центра", "Забирает файлы по SFTP")
+
+Rel(bo, abs, "Обновляют ставки")
+Rel(abs, ccs, "Ставки при каждом изменении", "Kafka, deposit.rates")
+Rel(abs, sftp, "CSV-файл со ставками", "SFTP")
+Rel(pccs, sftp, "Забирает свежий файл", "SFTP")
+Rel(client, cc_op, "Звонок")
+Rel(client, pcc_op, "Звонок при перегрузке банка")
+Rel(cc_op, ccs, "Смотрит ставки")
+Rel(pcc_op, pccs, "Смотрит ставки")
+@enduml
